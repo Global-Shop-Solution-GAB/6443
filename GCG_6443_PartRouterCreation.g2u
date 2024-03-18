@@ -1,0 +1,556 @@
+﻿Program.Sub.ScreenSU.Start
+Gui.frmFlyPart..Create(BaseForm)
+Gui.frmFlyPart..Caption("Create Part on the Fly")
+Gui.frmFlyPart..Size(339,130)
+Gui.frmFlyPart..MinX(0)
+Gui.frmFlyPart..MinY(0)
+Gui.frmFlyPart..Position(0,0)
+Gui.frmFlyPart..AlwaysOnTop(False)
+Gui.frmFlyPart..FontName("Tahoma")
+Gui.frmFlyPart..FontSize(8.25)
+Gui.frmFlyPart..ControlBox(True)
+Gui.frmFlyPart..MaxButton(True)
+Gui.frmFlyPart..MinButton(True)
+Gui.frmFlyPart..MousePointer(0)
+Gui.frmFlyPart..Moveable(True)
+Gui.frmFlyPart..Sizeable(False)
+Gui.frmFlyPart..ShowInTaskBar(True)
+Gui.frmFlyPart..TitleBar(True)
+Gui.frmFlyPart..Event(UnLoad,frmFlyPart_UnLoad)
+Gui.frmFlyPart.lblPart.Create(Label,"Part",True,20,13,0,27,30,True,0,"Tahoma",8.25,,0,0)
+Gui.frmFlyPart.lblPart.BorderStyle(0)
+Gui.frmFlyPart.txtPart.Create(TextBox,"",True,239,20,0,55,26,True,0,"Tahoma",8.25,,1)
+Gui.frmFlyPart.txtPart.MaxLength(20)
+Gui.frmFlyPart.txtPart.TabStop(True)
+Gui.frmFlyPart.txtPart.TabIndex(1)
+Gui.frmFlyPart.cmdSave.Create(Button)
+Gui.frmFlyPart.cmdSave.Enabled(True)
+Gui.frmFlyPart.cmdSave.Visible(True)
+Gui.frmFlyPart.cmdSave.Zorder(0)
+Gui.frmFlyPart.cmdSave.Size(75,23)
+Gui.frmFlyPart.cmdSave.Position(127,62)
+Gui.frmFlyPart.cmdSave.Caption("Save")
+Gui.frmFlyPart.cmdSave.FontName("Tahoma")
+Gui.frmFlyPart.cmdSave.FontSize(8.25)
+Gui.frmFlyPart.cmdSave.TabStop(True)
+Gui.frmFlyPart.cmdSave.TabIndex(2)
+Gui.frmFlyPart.cmdSave.Event(Click,cmdSave_Click)
+Program.Sub.ScreenSU.End
+
+Program.Sub.Preflight.Start
+V.Global.bConOpen.Declare(Boolean, False)
+V.Global.sEnteredPart.Declare
+V.Global.bIsDS.Declare(Boolean, False)
+Program.Sub.Preflight.End
+Program.Sub.Main.Start
+'Author: Brandon Medina
+'Customer: Casual Cushion
+'Quote: 13044-0
+'ARC: 6443
+'Desc: Script will be attached to Script 1 button on Sales order line entry screen. Will auto create parts and copy router, inventory, and pricing info from templates 
+
+F.Intrinsic.Control.Try
+	'Function.Intrinsic.UI.UsePixels ' Allows you to use Pixels instead of Twips throughout
+	
+	V.Local.sWarningMessage.Declare
+	'Passed Variables
+	'000162: Script 1 Button Caption 
+	'000141: Script 2 Button Caption
+	'000210: Script 3 Button Caption 
+
+	F.Intrinsic.Control.SelectCase(V.Caller.Hook)
+		'Order Entry Lines Populate Hook
+		F.Intrinsic.Control.Case(12010)
+			V.Passed.000162.Set("Copy Part/Rtr")
+			F.Intrinsic.Control.End
+		'Order Entry Lines Script 1 Hook	
+		F.Intrinsic.Control.Case(12410)
+			'Project changed to create new part on a separate form and then set it on the core screen once created. This ensure core part module runs and doesn't cause issues w/ acknowledgement report
+			Gui.frmFlyPart..Show
+		F.Intrinsic.Control.CaseElse
+			F.Intrinsic.String.Build("Project GCG_6443_PartRouterCreation.g2u is attached to hook: {0}{1}Consider removing this sequence from the hook.", V.Caller.Hook, V.Ambient.NewLine, V.Local.sWarningMessage)
+			F.Intrinsic.UI.Msgbox(V.Local.sWarningMessage, "Warning")
+			F.Intrinsic.Control.End
+	F.Intrinsic.Control.EndSelect
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub(ErrorMsg, CurrentSub, v.Ambient.CurrentSubroutine)
+F.Intrinsic.Control.EndTry
+Program.Sub.Main.End
+
+Program.Sub.ErrorMsg.Start
+V.Local.sError.Declare
+
+F.Intrinsic.UI.CloseWaitDialog
+
+F.Intrinsic.Control.If(V.Global.bConOpen)
+	F.ODBC.Connection!con.Close
+F.Intrinsic.Control.EndIf	
+
+'Generic Error message.
+f.Intrinsic.String.Build("Project GCG_6440_UpdateOpenSOPricing.g2u {0}{0}Subroutine: {1}{0}Error: {2} with Description: {3}", v.Ambient.NewLine, v.Args.CurrentSub, v.Ambient.ErrorNumber, v.Ambient.ErrorDescription, v.Local.sError)
+f.Intrinsic.UI.Msgbox(v.Local.sError)
+Program.Sub.ErrorMsg.End
+
+Program.Sub.CheckPartExist.Start
+F.Intrinsic.Control.Try
+	V.Local.sPartInfo.Declare
+	V.Local.iCalledFromHook.Declare
+	V.Local.sRet.Declare
+	V.Local.sMsg.Declare
+	V.Local.sStyle.Declare
+	V.Local.sFabric.Declare
+	V.Local.sFABPart.Declare
+	V.Local.sFabricInfo.Declare
+	V.Local.sStyleInfo.Declare
+	V.Local.sSQL.Declare
+	V.Local.sSeq5Part.Declare
+	V.Local.sSkin.Declare
+	V.Local.sBOMNumbering.Declare
+	V.Local.sAlt2.Declare
+	V.Local.sUser1.Declare
+	V.Local.sObsInactiveFlag.Declare
+	V.Local.sObsFlag.Declare
+	V.Local.sInactiveFlag.Declare
+	
+	'Passed Variables: 
+	'000052: Part
+	'000053: Rev (Customer says they don't use rev)
+	'V.Global.sEnteredPart.Set(V.Passed.000052)
+	V.Global.sEnteredPart.Set(V.Screen.frmFlyPart!txtPart.Text)
+	'V.Local.sEnteredRev.Set(V.Passed.000053)
+	
+	F.Intrinsic.UI.InvokeWaitDialog("Validating Part & Inventory...", "Please Wait")
+	'Check if inventory part entered already exists, if so end script 
+	F.Global.Inventory.GetPartInfo(V.Global.sEnteredPart, "", V.Local.sPartInfo)
+	F.Intrinsic.Control.If(V.Local.sPartInfo, <>, "***NOPARTFOUND***")
+		F.Intrinsic.UI.Msgbox("Part already exists in inventory. No copying will be done.", "Attention")
+		F.Intrinsic.Control.End
+	F.Intrinsic.Control.EndIf
+
+
+	'Determine if Part is Drop Ship
+	F.Intrinsic.String.Left(V.Global.sEnteredPart, 2, V.Local.sRet)
+	F.Intrinsic.Control.If(V.Local.sRet, =, "DS")
+		V.Global.bIsDS.Set(True)
+	F.Intrinsic.Control.Else
+		V.Global.bIsDS.Set(False)
+	F.Intrinsic.Control.EndIf
+	
+	'DS and non DS part start w/ same validation at the beginning, but end with different part copy logic  
+	F.Intrinsic.String.Split(V.Global.sEnteredPart, "-", V.Local.sRet)
+	'Prior to '-' is the Style, after it is the Fabric code 
+	V.Local.sStyle.Set(V.Local.sRet(0))
+	V.Local.sFabric.Set(V.Local.sRet(1))
+	'Verify format is correct 
+	F.Intrinsic.Control.If(V.Local.sRet.UBound, <>, 1)
+		F.Intrinsic.UI.Msgbox("Entered Part is not in the correct format", "Attention")
+		F.Intrinsic.Control.End
+	F.Intrinsic.Control.EndIf
+	'Verify length is correct
+	'Originally style code was between 2-10 characters, later changed to 12. If customer uses full 12, + 8 on fabric code, with the hyphen would push part length to 21 characters. 
+	'Have additional check on entire part to ensure it is 20 or less characters 
+	F.Intrinsic.Control.If(V.Local.sStyle.Length, <, 2, OR, V.Local.sStyle.Length, >, 12)
+		F.Intrinsic.UI.Msgbox("Style code length in Part box needs to be 2-12 characters. Please try again", "Attention")
+		F.Intrinsic.Control.End
+	F.Intrinsic.Control.EndIf
+	'Quote said 3-6 char in length, customer later changed to accept up to 8. No reason not to do this. Customer does not use long part, nor do they use rev numbers 
+	F.Intrinsic.Control.If(V.Local.sFabric.Length, <, 3, OR, V.Local.sFabric.Length, >, 8)
+		F.Intrinsic.UI.Msgbox("Fabric code length in Part box needs to be 3-8 characters. Please try again", "Attention")
+		F.Intrinsic.Control.End
+	F.Intrinsic.Control.EndIf
+	F.Intrinsic.Control.If(V.Global.sEnteredPart.Length, >, 20)
+		F.Intrinsic.UI.Msgbox("Total length of part can only be up to 20 characters long. Please try again.", "Attention")
+		F.Intrinsic.Control.End
+	F.Intrinsic.Control.EndIf
+	
+	'Verify Part number exists for Style. If not end
+	F.Global.Inventory.GetPartInfo(V.Local.sStyle, "", "", V.Local.sStyleInfo)
+	F.Intrinsic.Control.If(V.Local.sStyleInfo, =, "***NOPARTFOUND***")
+		F.Intrinsic.String.Build("Style part {0} does not exist in inventory", V.Local.sStyle, V.Local.sMsg)
+		F.Intrinsic.UI.Msgbox(V.Local.sMsg, "Attention")
+		F.Intrinsic.Control.End
+	F.Intrinsic.Control.EndIf
+	'Manually grab alt desc 2 to add to StyleInfo 
+	F.Intrinsic.String.Build("select DESCRIPTION_3 from INVENTORY_MST2 where PART = '{0}'", V.Local.sStyle.PSQLFriendly, V.Local.sSQL)
+	F.ODBC.Connection!con.OpenCompanyConnection
+	V.Global.bConOpen.Set(True)
+	F.ODBC.Connection!con.ExecuteAndReturn(V.Local.sSQL, V.Local.sAlt2)
+	F.Intrinsic.String.Build("{0}*!*{1}", V.Local.sStyleInfo, V.Local.sAlt2.Trim, V.Local.sStyleInfo)
+	'Manually grab user field 1 to add to StyleInfo
+	F.Intrinsic.String.Build("select TEXT_INFO1 from INVENTORY_MST2 where PART = '{0}'", V.Local.sStyle.PSQLFriendly, V.Local.sSQL)
+	F.ODBC.Connection!con.ExecuteAndReturn(V.Local.sSQL, V.Local.sUser1)
+	F.Intrinsic.String.Build("{0}*!*{1}", V.Local.sStyleInfo, V.Local.sUser1.Trim, V.Local.sStyleInfo)
+	F.ODBC.Connection!con.Close
+	V.Global.bConOpen.Set(False)
+	
+	'Verify Fabric number exists. If not end 
+	F.Intrinsic.String.Build("FAB-{0}", V.Local.sFabric, V.Local.sFABPart)
+	F.Global.Inventory.GetPartInfo(V.Local.sFABPart, "", "", V.Local.sFabricInfo)
+	F.Intrinsic.Control.If(V.Local.sFabricInfo, =, "***NOPARTFOUND***")
+		F.Intrinsic.String.Build("Fabric code {0} does not exist in inventory", V.Local.sFABPart, V.Local.sMsg)
+		F.Intrinsic.UI.Msgbox(V.Local.sMsg, "Attention")
+		F.Intrinsic.Control.End
+	F.Intrinsic.Control.EndIf
+	
+	'Check if Fabric is inactive or obsoleted. If so end 
+	F.Intrinsic.String.Build("select ltrim(rtrim(FLAG_INACTIVE)), ltrim(rtrim(OBSOLETE_FLAG)) from INVENTORY_MSTR where PART = '{0}'", V.Local.sFABPart.PSQLFriendly, V.Local.sSQL)
+	F.ODBC.Connection!con.OpenCompanyConnection
+	V.Global.bConOpen.Set(True)
+	F.ODBC.Connection!con.ExecuteAndReturn(V.Local.sSQL, V.Local.sObsInactiveFlag)
+	F.Intrinsic.String.Split(V.Local.sObsInactiveFlag, "*!*", V.Local.sObsInactiveFlag)
+	V.Local.sInactiveFlag.Set(V.Local.sObsInactiveFlag(0))
+	V.Local.sObsFlag.Set(V.Local.sObsInactiveFlag(1))
+	F.Intrinsic.Control.If(V.Local.sInactiveFlag, =, "Y", OR, V.Local.sObsFlag, =, "Y")
+		F.Intrinsic.UI.CloseWaitDialog
+		F.Intrinsic.String.Build("Fabric part {0} has either been marked as inactive, or obsolete in inventory. No part will be created", V.Local.sFABPart, V.Local.sMsg)
+		F.Intrinsic.UI.Msgbox(V.Local.sMsg, "Attention")
+		F.Intrinsic.Control.End
+	F.Intrinsic.Control.EndIf
+
+	F.ODBC.Connection!con.Close
+	V.Global.bConOpen.Set(False)
+	
+	
+	'Account for differences w Drop ship before calling next subroutine 
+	F.Intrinsic.Control.If(V.Global.bIsDS.Not)
+		'Return info to copy subroutine for non drop ship parts. Otherwise, modify what gets passed and return 
+		F.Intrinsic.UI.CloseWaitDialog
+		F.Intrinsic.Control.CallSub(CopyPartPrice, styleCode, V.Local.sStyle, fabricCode, V.Local.sFabric, styleInfo, V.Local.sStyleInfo, fabricInfo, V.Local.sFabricInfo, skinCode, V.Global.sEnteredPart, fabPart, V.Local.sFABPart)
+	F.Intrinsic.Control.Else
+		'Pull part from seq 5 in style router 
+		F.ODBC.Connection!con.OpenCompanyConnection
+		V.Global.bConOpen.Set(True)
+		
+		'Read OPTBOM numbering option 
+		F.Global.General.ReadOption(401096, 3, 0010, V.Local.sBOMNumbering)
+		F.Intrinsic.Math.Mult(V.Local.sBOMNumbering, 0.05, V.Local.sBOMNumbering)
+		F.Intrinsic.String.LPad(V.Local.sBOMNumbering, "0", 6, V.Local.sBOMNumbering)
+		
+		F.Intrinsic.String.Build("select PART_WC_OUTSIDE from V_ROUTER_LINE where ROUTER = '{0}' and LINE_ROUTER = '{1}'", V.Local.sStyle.PSQLFriendly, V.Local.sBOMNumbering.PSQLFriendly, V.Local.sSQL)
+		F.ODBC.Connection!con.ExecuteAndReturn(V.Local.sSQL, V.Local.sSeq5Part)
+		F.ODBC.Connection!con.Close
+		V.Global.bConOpen.Set(False)
+		
+		F.Intrinsic.String.Build("{0}-{1}", V.Local.sSeq5Part.Trim, V.Local.sFabric, V.Local.sSkin)
+		V.Local.sRet.Redim(0, 0)
+		F.Global.Inventory.GetPartInfo(V.Local.sSkin, "", "", V.Local.sRet)
+		F.Intrinsic.Control.If(V.Local.sRet, =, "***NOPARTFOUND***")
+			F.Intrinsic.String.Build("Skin code {0} does not exist in inventory", V.Local.sSkin.Trim, V.Local.sMsg)
+			F.Intrinsic.UI.Msgbox(V.Local.sMsg, "Attention")
+			F.Intrinsic.Control.End
+		F.Intrinsic.Control.EndIf
+		F.Intrinsic.UI.CloseWaitDialog
+		'In the case of drop ship, pass the additional variable containing the hypenated seq 5 + fabric code part's info 
+		F.Intrinsic.Control.CallSub(CopyPartPrice, styleCode, V.Local.sStyle, fabricCode, V.Local.sFabric, styleInfo, V.Local.sStyleInfo, fabricInfo, V.Local.sFabricInfo, skinCode, V.Local.sSkin, skinInfo, V.Local.sRet, fabPart, V.Local.sFABPart)
+	F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub(ErrorMsg, CurrentSub, v.Ambient.CurrentSubroutine)
+F.Intrinsic.Control.EndTry
+Program.Sub.CheckPartExist.End
+
+Program.Sub.CopyPartPrice.Start
+F.Intrinsic.Control.Try
+	V.Local.sRet.Declare
+	V.Local.sMsg.Declare
+	V.Local.sStyle.Declare
+	V.Local.sFabric.Declare
+	V.Local.sFABPart.Declare
+	V.Local.sFabricInfo.Declare
+	V.Local.sStyleInfo.Declare
+	V.Local.sSkin.Declare
+	V.Local.sSourceCode.Declare
+	V.Local.sSQL.Declare
+	V.Local.sFABGrade.Declare
+	V.Local.sPrice.Declare
+	V.Local.sSkinInfo.Declare
+	V.Local.sFileContents.Declare
+	V.Local.sFile.Declare
+	V.Local.sDefBin.Declare
+	V.Local.sStockBin.Declare
+	V.Local.iRet.Declare
+	V.Local.sPartRev.Declare
+	V.Local.sParams.Declare
+	V.Local.sStyleAltDesc1.Declare
+	V.Local.sData.Declare
+	V.Local.sExtraDesc.Declare
+	
+	F.Intrinsic.UI.InvokeWaitDialog("Copying to new Part and Setting Price...", "Please Wait")
+	'Assign passed arg variables to local ones 
+	V.Local.sStyle.Set(V.Args.styleCode)
+	V.Local.sFabric.Set(V.Args.fabricCode)
+	V.Local.sFABPart.Set(V.Args.fabPart.Trim)
+	V.Local.sStyleInfo.Set(V.Args.styleInfo)
+	V.Local.sFabricInfo.Set(V.Args.fabricInfo)
+	'Skin code in the case it is drop ship part is the seq 5 + fabric code from previous subroutine 
+	V.Local.sSkin.Set(V.Args.skinCode)
+	F.Intrinsic.Control.If(V.Global.bIsDS)
+		V.Local.sSkinInfo.Set(V.Args.skinInfo)
+	F.Intrinsic.Control.EndIf
+	
+	F.Intrinsic.String.Split(V.Local.sStyleInfo, "*!*", V.Local.sStyleInfo)
+	F.Intrinsic.String.Split(V.Local.sFabricInfo, "*!*", V.Local.sFabricInfo)
+	
+	'Legend for Part Info Strings 
+	'0:PL 1: Desc 2: UM 3: Onhand Qty 4: Cost 5: Price 6: Sort Code 7: Lead Time 8: (Style only) Alt Desc 2 9:(Style only) User field 1
+	
+	'Need to query Inv Master to get missing info (Loc & Source Code)
+	F.ODBC.Connection!con.OpenCompanyConnection
+	V.Global.bConOpen.Set(True)
+	'F.Intrinsic.String.Build("select LOCATION from INVENTORY_MSTR where PART = '")
+	F.Intrinsic.String.Build("select CODE_SOURCE from INVENTORY_MST2 where PART = '{0}'", V.Local.sStyle.Trim.PSQLFriendly, V.Local.sSQL)
+	F.ODBC.Connection!con.ExecuteAndReturn(V.Local.sSQL, V.Local.sSourceCode)
+	
+	'Get price for new part. Find grade of fabric (User 2 Defined on Inv Mstr), and get coresponding price of style (Alt Price 1-7 corresponding to A-G)
+	F.Intrinsic.String.Build("select TEXT_INFO2 from INVENTORY_MST2 where PART = '{0}'", V.Local.sFABPart.PSQLFriendly, V.Local.sSQL)
+	F.ODBC.Connection!con.ExecuteAndReturn(V.Local.sSQL, V.Local.sFABGrade)
+		'To find corresponding price, create dictionary (table)	
+	F.Data.Dictionary.Create("dictPrices")
+	F.Data.Dictionary.AddItem("dictPrices", "A", "ALT_PRICE_1")
+	F.Data.Dictionary.AddItem("dictPrices", "B", "ALT_PRICE_2")
+	F.Data.Dictionary.AddItem("dictPrices", "C", "ALT_PRICE_3")
+	F.Data.Dictionary.AddItem("dictPrices", "D", "ALT_PRICE_4")
+	F.Data.Dictionary.AddItem("dictPrices", "E", "ALT_PRICE_5")
+	F.Data.Dictionary.AddItem("dictPrices", "F", "ALT_PRICE_6")
+	F.Data.Dictionary.AddItem("dictPrices", "G", "ALT_PRICE_7")
+	'Add fabric grades H-J per customer request
+	F.Data.Dictionary.AddItem("dictPrices", "H", "ALT_PRICE_8")
+	F.Data.Dictionary.AddItem("dictPrices", "I", "ALT_PRICE_9")
+	F.Data.Dictionary.AddItem("dictPrices", "J", "ALT_PRICE_10")
+	'In the case that there is no grade entered, default to using price of grade A per customer request 
+	F.Intrinsic.Control.If(V.Local.sFABGrade.Trim, <>, "")
+		F.Intrinsic.String.Build("select {0} from INV_ALT_PRICE where PART = '{1}'", V.Dictionary.dictPrices![V.Local.sFABGrade.Trim], V.Local.sStyle.PSQLFriendly, V.Local.sSQL)
+	F.Intrinsic.Control.Else
+		F.Intrinsic.String.Build("select ALT_PRICE_1 from INV_ALT_PRICE where PART = '{0}'", V.Local.sStyle.PSQLFriendly, V.Local.sSQL)
+	F.Intrinsic.Control.EndIf
+	F.ODBC.Connection!con.ExecuteAndReturn(V.Local.sSQL, V.Local.sPrice)
+	F.ODBC.Connection!con.Close
+	V.Global.bConOpen.Set(False)
+	
+	'Begin Copy Part/Price (Style > New Skin) Alt Desc 1 of New entered part should match Desc of Fabric Part (***For non Drop Ship Parts***)
+	'make sure to grab user field 1, and alt desc 2 as well to copy over 
+	'Modify Part Bin records (default and stocking) via SQL
+	'Explicitly write extra desc of parent part to new part
+	F.ODBC.Connection!con.OpenCompanyConnection
+	V.Global.bConOpen.Set(True)
+
+	F.Intrinsic.Control.If(V.Global.bIsDS.Not)
+		'F.Global.Inventory.CreatePart(V.Local.sSkin, V.Local.sStyleInfo(2), V.Local.sStyleInfo(1), "", V.Local.sStyleInfo(0), V.Local.sSourceCode, V.Local.sFabricInfo(1), "", V.Local.sPrice, "UPLOADED") 
+		F.Global.Inventory.CreatePart(V.Local.sSkin, V.Local.sStyleInfo(2), V.Local.sStyleInfo(1), "", V.Local.sStyleInfo(0), V.Local.sSourceCode, V.Local.sFabricInfo(1), V.Local.sStyleInfo(8), V.Local.sPrice, "UPLOADED") 
+		F.Intrinsic.String.Build("select rtrim(ltrim(BIN)) from V_INVENTORY_MSTR where PART = '{0}'", V.Local.sStyle.PSQLFriendly, V.Local.sSQL)
+		F.ODBC.Connection!con.ExecuteAndReturn(V.Local.sSQL, V.Local.sDefBin)
+		F.Intrinsic.String.Build("select rtrim(ltrim(STOCK_BIN)) from V_INVENTORY_MST3 where PART = '{0}'", V.Local.sStyle.PSQLFriendly, V.Local.sSQL)
+		F.ODBC.Connection!con.ExecuteAndReturn(V.Local.sSQL, V.Local.sStockBin)
+		F.Intrinsic.String.Build("update INVENTORY_MSTR set BIN = '{0}' where PART = '{1}'", V.Local.sDefBin.PSQLFriendly, V.Local.sSkin.PSQLFriendly, V.Local.sSQL)
+		F.ODBC.Connection!con.Execute(V.Local.sSQL)
+		F.Intrinsic.String.Build("update INVENTORY_MST3 set STOCK_BIN = '{0}' where PART = '{1}'", V.Local.sStockBin.PSQLFriendly, V.Local.sSkin.PSQLFriendly, V.Local.sSQL)
+		F.ODBC.Connection!con.Execute(V.Local.sSQL)
+		F.Intrinsic.String.Build("update INVENTORY_MST2 set TEXT_INFO1 = '{0}' where PART = '{1}'", V.Local.sStyleInfo(9).PSQLFriendly, V.Local.sSkin.PSQLFriendly, V.Local.sSQL)
+		F.ODBC.Connection!con.Execute(V.Local.sSQL)
+		'Something is going on with the extra desc of the new part. When BI_ACKNWLDGMNT builds the records, it doesn't bring in the line type "D" records, which corresponds to the extra desc.  
+		F.Intrinsic.String.Build("select TEXT from INV_EXTRA_TEXT where PART = '{0}'", V.Local.sStyle.PSQLFriendly, V.Local.sSQL)
+		F.ODBC.Connection!con.ExecuteAndReturn(V.Local.sSQL, V.Local.sExtraDesc)
+		F.Intrinsic.String.Build("{0}*!*{1}", V.Global.sEnteredPart, V.Local.sExtraDesc, V.Local.sData)
+		F.Data.DataTable.CreateFromString("dtExtraDesc", V.Local.sData, "PART*!*TEXT", "String*!*String", "*!*", "")
+		F.Intrinsic.Control.If(V.DataTable.dtExtraDesc.RowCount, <>, 0)
+			F.Data.DataTable.SaveToDB("dtExtraDesc", "con", "INV_EXTRA_TEXT", "PART*!*TEXT", 256)
+		F.Intrinsic.Control.EndIf
+	F.Intrinsic.Control.Else
+		'F.Global.Inventory.CreatePart(V.Global.sEnteredPart, V.Local.sStyleInfo(2), V.Local.sStyleInfo(1), "", V.Local.sStyleInfo(0), V.Local.sSourceCode, V.Local.sFabricInfo(1), "", V.Local.sPrice, "UPLOADED") 
+		F.Global.Inventory.CreatePart(V.Global.sEnteredPart, V.Local.sStyleInfo(2), V.Local.sStyleInfo(1), "", V.Local.sStyleInfo(0), V.Local.sSourceCode, V.Local.sFabricInfo(1), V.Local.sStyleInfo(8), V.Local.sPrice, "UPLOADED") 
+		F.Intrinsic.String.Build("select rtrim(ltrim(BIN)) from V_INVENTORY_MSTR where PART = '{0}'", V.Local.sStyle.PSQLFriendly, V.Local.sSQL)
+		F.ODBC.Connection!con.ExecuteAndReturn(V.Local.sSQL, V.Local.sDefBin)
+		F.Intrinsic.String.Build("select rtrim(ltrim(STOCK_BIN)) from V_INVENTORY_MST3 where PART = '{0}'", V.Local.sStyle.PSQLFriendly, V.Local.sSQL)
+		F.ODBC.Connection!con.ExecuteAndReturn(V.Local.sSQL, V.Local.sStockBin)
+		F.Intrinsic.String.Build("update INVENTORY_MSTR set BIN = '{0}' where PART = '{1}'", V.Local.sDefBin.PSQLFriendly, V.Global.sEnteredPart.PSQLFriendly, V.Local.sSQL)
+		F.ODBC.Connection!con.Execute(V.Local.sSQL)
+		F.Intrinsic.String.Build("update INVENTORY_MST3 set STOCK_BIN = '{0}' where PART = '{1}'", V.Local.sStockBin.PSQLFriendly, V.Global.sEnteredPart.PSQLFriendly, V.Local.sSQL)
+		F.ODBC.Connection!con.Execute(V.Local.sSQL)
+		F.Intrinsic.String.Build("update INVENTORY_MST2 set TEXT_INFO1 = '{0}' where PART = '{1}'", V.Local.sStyleInfo(9).PSQLFriendly, V.Global.sEnteredPart.PSQLFriendly, V.Local.sSQL)
+		F.ODBC.Connection!con.Execute(V.Local.sSQL)
+		'Something is going on with the extra desc of the new part. When BI_ACKNWLDGMNT builds the records, it doesn't bring in the line type "D" records, which corresponds to the extra desc.  
+		F.Intrinsic.String.Build("select TEXT from INV_EXTRA_TEXT where PART = '{0}'", V.Local.sStyle.PSQLFriendly, V.Local.sSQL)
+		F.ODBC.Connection!con.ExecuteAndReturn(V.Local.sSQL, V.Local.sExtraDesc)
+		F.Intrinsic.String.Build("{0}*!*{1}", V.Global.sEnteredPart, V.Local.sExtraDesc, V.Local.sData)
+		F.Data.DataTable.CreateFromString("dtExtraDesc", V.Local.sData, "PART*!*TEXT", "String*!*String", "*!*", "")
+		F.Intrinsic.Control.If(V.DataTable.dtExtraDesc.RowCount, <>, 0)
+			F.Data.DataTable.SaveToDB("dtExtraDesc", "con", "INV_EXTRA_TEXT", "PART*!*TEXT", 256)
+		F.Intrinsic.Control.EndIf
+	F.Intrinsic.Control.EndIf
+	F.Data.DataTable.Close("dtExtraDesc")
+	
+	'Prompt user if they want to maintain part now. if so, call INVMAIN in mode O w Part/rev and location as parameters to have it pull up up to date inv master screen 
+	F.Intrinsic.String.Build("Would you like to maintain part: {0}?", V.Global.sEnteredPart, V.Local.sMsg)
+	F.Intrinsic.UI.Msgbox(V.Local.sMsg, "Maintain Part?", 4, V.Local.iRet)
+	F.Intrinsic.Control.If(V.Local.iRet, =, 6)
+		F.Intrinsic.String.GSSPartString(V.Global.sEnteredPart, "", V.Local.sPartRev)
+		F.Intrinsic.String.ConcatCallWrapperArgs("O", V.Local.sPartRev, "", V.Local.sParams)
+		F.Global.General.CallWrapperSync("300000", V.Local.sParams)
+	F.Intrinsic.Control.EndIf
+	
+	F.ODBC.Connection!con.Close
+	V.Global.bConOpen.Set(False)
+	
+	'Return Style and Fabric info array to a single delimited string to pass onto next subroutine 
+	F.Intrinsic.String.Join(V.Local.sStyleInfo, "*!*", V.Local.sStyleInfo)
+	F.Intrinsic.String.Join(V.Local.sFabricInfo, "*!*", V.Local.sFabricInfo)
+	
+	'Continue calling Copy Router
+	F.Intrinsic.Control.If(V.Global.bIsDS)
+		F.Global.Inventory.GetPartInfo(V.Global.sEnteredPart.Trim, "", "", V.Local.sRet)
+	F.Intrinsic.Control.Else
+		F.Global.Inventory.GetPartInfo(V.Local.sSkin, "", "", V.Local.sRet)
+	F.Intrinsic.Control.EndIf
+	
+	F.Intrinsic.Control.If(V.Local.sRet, =, "***NOPARTFOUND***")
+		F.Intrinsic.UI.Msgbox("Newly Created part not found in inventory", "Attention")
+		F.Intrinsic.Control.End
+	F.Intrinsic.Control.Else
+		F.Intrinsic.UI.CloseWaitDialog
+			
+		F.Intrinsic.Control.CallSub(CopyRouter, styleCode, V.Local.sStyle, fabricCode, V.Local.sFabric, styleInfo, V.Local.sStyleInfo, fabricInfo, V.Local.sFabricInfo, skinCode, V.Local.sSkin, skinInfo, V.Local.sSkinInfo, fabPart, V.Local.sFABPart, defBin, V.Local.sDefBin)
+	F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub(ErrorMsg, CurrentSub, v.Ambient.CurrentSubroutine)
+F.Intrinsic.Control.EndTry
+Program.Sub.CopyPartPrice.End
+
+Program.Sub.CopyRouter.Start
+F.Intrinsic.Control.Try
+	V.Local.sRet.Declare
+	V.Local.sMsg.Declare
+	V.Local.sStyle.Declare
+	V.Local.sFabric.Declare
+	V.Local.sFABPart.Declare
+	V.Local.sFabricInfo.Declare
+	V.Local.sStyleInfo.Declare
+	V.Local.sSkin.Declare
+	V.Local.sSkinInfo.Declare
+	V.Local.sSourceCode.Declare
+	V.Local.sSQL.Declare
+	V.Local.sFABGrade.Declare
+	V.Local.sPrice.Declare
+	V.Local.sSeq5Part.Declare
+	V.Local.sBOMNumbering.Declare
+	V.Local.sEnteredPartInfo.Declare
+	V.Local.sFile.Declare
+	V.Local.sDefBin.Declare
+
+	F.Intrinsic.UI.InvokeWaitDialog("Copying Router info...", "Please Wait")
+	'Assign passed arg variables to local ones 
+	V.Local.sStyle.Set(V.Args.styleCode)
+	V.Local.sFabric.Set(V.Args.fabricCode)
+	V.Local.sFABPart.Set(V.Args.fabPart)
+	V.Local.sStyleInfo.Set(V.Args.styleInfo)
+	V.Local.sFabricInfo.Set(V.Args.fabricInfo)
+	V.Local.sSkin.Set(V.Args.skinCode)
+	V.Local.sDefBin.Set(V.Args.defBin)
+	F.Intrinsic.Control.If(V.Global.bIsDS)
+		V.Local.sSkinInfo.Set(V.Args.skinInfo)
+	F.Intrinsic.Control.EndIf
+	
+	'Begin Router Copy 
+	F.Global.Callwrapper.New("CopyRouter", "Manufacturing.CopyRouter")
+	F.Global.Callwrapper.SetProperty("CopyRouter", "CompanyCode", V.Caller.CompanyCode)
+	F.Global.Callwrapper.SetProperty("CopyRouter", "RouterNumber", V.Local.sStyle.Trim)
+	'F.Global.Callwrapper.SetProperty("CopyRouter", "Revision", V.Caller.CompanyCode)
+	F.Intrinsic.Control.If(V.Global.bIsDS.Not)
+		F.Global.Callwrapper.SetProperty("CopyRouter", "ToRouterNumber", V.Local.sSkin.Trim)
+	F.Intrinsic.Control.Else
+		F.Global.Callwrapper.SetProperty("CopyRouter", "ToRouterNumber", V.Global.sEnteredPart.Trim)
+	F.Intrinsic.Control.EndIf
+	
+	F.Global.Callwrapper.Run("CopyRouter")
+	
+	F.ODBC.Connection!con.OpenCompanyConnection
+	V.Global.bConOpen.Set(True)
+	
+	'Legend for Part Info Strings 
+	'0:PL 1: Desc 2: UM 3: Onhand Qty 4: Cost 5: Price 6: Sort Code 7: Lead Time 
+	'Read OPTBOM numbering option 
+	
+	F.Global.General.ReadOption(401096, 3, 0010, V.Local.sBOMNumbering)
+	F.Intrinsic.Math.Mult(V.Local.sBOMNumbering, 0.05, V.Local.sBOMNumbering)
+	'F.Intrinsic.Math.Mult(V.Local.sBOMNumbering, 5, V.Local.sBOMNumbering)
+	F.Intrinsic.String.LPad(V.Local.sBOMNumbering, "0", 6, V.Local.sBOMNumbering)
+	
+	V.Local.sFABPart.Set(V.Local.sFABPart.Trim)
+	V.Local.sSkin.Set(V.Local.sSkin.Trim)
+	
+	
+	F.Intrinsic.Control.If(V.Global.bIsDS.Not)
+		'Replace seq 5's part number & desc of new router w that of the fabric code (if it's non DS part)
+		F.Intrinsic.String.Split(V.Local.sFabricInfo, "*!*", V.Local.sFabricInfo)
+		V.Local.sFabricInfo(1).Set(V.Local.sFabricInfo(1).Trim)
+		F.Intrinsic.String.Build("update ROUTER_LINE set PART_WC_OUTSIDE = '{0}', DESC_RT_LINE = '{1}' where ROUTER = '{2}' and LINE_ROUTER = '{3}'", V.Local.sFABPart.PSQLFriendly, V.Local.sFabricInfo(1).PSQLFriendly, V.Local.sSkin.PSQLFriendly, V.Local.sBOMNumbering.PSQLFriendly, V.Local.sSQL)
+	F.Intrinsic.Control.Else
+		'Replace seq 5's part number and desc of new router w that of the appended seq 5 of drop ship "style" router + fabric code 
+		F.Intrinsic.String.Split(V.Local.sSkinInfo, "*!*", V.Local.sSkinInfo)
+		V.Local.sSkinInfo(1).Set(V.Local.sSkinInfo(1).Trim)
+		F.Intrinsic.String.Build("update ROUTER_LINE set PART_WC_OUTSIDE = '{0}', DESC_RT_LINE = '{1}' where ROUTER = '{2}' and LINE_ROUTER = '{3}'", V.Local.sSkin.PSQLFriendly, V.Local.sSkinInfo(1).PSQLFriendly, V.Global.sEnteredPart.PSQLFriendly, V.Local.sBOMNumbering.PSQLFriendly, V.Local.sSQL)
+	F.Intrinsic.Control.EndIf
+	
+	F.ODBC.Connection!con.Execute(V.Local.sSQL)
+	'Check router complete flag for entire router (header and line types)
+	F.Intrinsic.Control.If(V.Global.bIsDS.Not)
+		F.Intrinsic.String.Build("update ROUTER_SUPP_HDR set COMPLETE = '1' where RTR_NUM = '{0}'", V.Local.sSkin.PSQLFriendly, V.Local.sSQL)
+	F.Intrinsic.Control.Else
+		V.Global.sEnteredPart.Set(V.Global.sEnteredPart.Trim)
+		F.Intrinsic.String.Build("update ROUTER_SUPP_HDR set COMPLETE = '1' where RTR_NUM = '{0}'", V.Global.sEnteredPart.PSQLFriendly, V.Local.sSQL)
+	F.Intrinsic.Control.EndIf
+	
+	F.ODBC.Connection!con.Execute(V.Local.sSQL)
+
+	F.ODBC.Connection!con.Close
+	V.Global.bConOpen.Set(False)
+	F.Intrinsic.UI.CloseWaitDialog
+	
+	'Set info back to core screen 
+	'000052: Part 
+	'000053: Rev 
+	'000054: Loc
+	'000013: PL 
+	'000006: UM 
+	'000219: on hand qty 
+	'000012: Cost 
+	'000009: Price
+	'000026: Sort Code 
+	'000023: Bin
+	
+	'0:PL 1: Desc 2: UM 3: Onhand Qty 4: Cost 5: Price 6: Sort Code 7: Lead Time 
+'	F.Global.Inventory.GetPartInfo(V.Global.sEnteredPart, V.Passed.000053, V.Passed.000054, V.Local.sRet)
+'	F.Intrinsic.String.Split(V.Local.sRet, "*!*", V.Local.sRet)
+'	V.Passed.000056.Set(V.Local.sRet(1))
+'	V.Passed.000013.Set(V.Local.sRet(0))
+'	V.Passed.000006.Set(V.Local.sRet(2))
+'	V.Passed.000219.Set(V.Local.sRet(3))
+'	V.Passed.000012.Set(V.Local.sRet(4))
+'	V.Passed.000009.Set(V.Local.sRet(5))
+'	V.Passed.000026.Set(V.Local.sRet(6))
+'	'Also populate bin 
+'	V.Passed.000023.Set(V.Local.sDefBin)
+	
+	'3/6 EDIT: Only fill out part info, part module will run and populate box automatically when core detects a change 
+	V.Passed.000052.Set(V.Global.sEnteredPart)
+	
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub(ErrorMsg, CurrentSub, v.Ambient.CurrentSubroutine)
+F.Intrinsic.Control.EndTry
+Program.Sub.CopyRouter.End
+Program.Sub.frmFlyPart_UnLoad.Start
+F.Intrinsic.Control.End
+Program.Sub.frmFlyPart_UnLoad.End
+Program.Sub.cmdSave_Click.Start
+F.Intrinsic.Control.Try
+	'Check part existence in inv master 
+	'Subroutine will call CopyPart and pass to it the verified Style & Fabric strings as well as it's info from GetPartInfo
+	F.Intrinsic.Control.CallSub(CheckPartExist)
+	F.Intrinsic.Control.CallSub(frmFlyPart_UnLoad)
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub(ErrorMsg, CurrentSub, v.Ambient.CurrentSubroutine)
+F.Intrinsic.Control.EndTry
+Program.Sub.cmdSave_Click.End
+
+Program.Sub.Comments.Start
+${$5$}$20.1.8286.22461$}$1
+${$6$}$bmedina$}$20230306204432160$}$kOipCrsyLBVj2KoSwkcdK23ChxGVcBlEQ42AXcdCV0W2vY8/n/YVltCIdFfX/oFg8S7Z/GOGzn0=
+Program.Sub.Comments.End
